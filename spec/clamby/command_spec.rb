@@ -5,16 +5,17 @@ describe Clamby::Command do
   before { Clamby.configure(Clamby::DEFAULT_CONFIG.dup) }
 
   describe 'ClamAV version' do
-    it 'returns true' do
+    it 'returns the ClamAV version string' do
       command = described_class.clamscan_version
-      expect(command).to be true
+      expect(command).to match(/\AClamAV \d+\.\d+\.\d+\/\d+\//)
     end
   end
 
   describe 'scan' do
     include_context 'paths'
 
-    let(:runner){ instance_double(described_class) }
+    let(:runner){ instance_double(described_class, status: process_status) }
+    let(:process_status) { instance_double 'Process::Status', exitstatus: 0 }
 
     describe 'exceptions' do
       it "can be configured to raise exception when file is missing" do
@@ -121,10 +122,7 @@ describe Clamby::Command do
       end
 
       it 'executes the freshclam executable from the custom path' do
-        expect(runner).to receive(:system).with(
-          "#{custom_path}/freshclam",
-          {}
-        ) { system("exit 0", out: File::NULL) }
+        expect(Open3).to receive(:popen3).with("#{custom_path}/freshclam")
 
         described_class.freshclam
       end
@@ -133,10 +131,7 @@ describe Clamby::Command do
         before { Clamby.configure(daemonize: false) }
 
         it 'executes the clamscan executable from the custom path' do
-          expect(runner).to receive(:system).with(
-            "#{custom_path}/clamscan --no-summary #{good_path}",
-            {}
-          ) { system("exit 0", out: File::NULL) }
+          expect(Open3).to receive(:popen3).with("#{custom_path}/clamscan", '--no-summary', good_path)
 
           described_class.scan(good_path)
         end
@@ -146,10 +141,7 @@ describe Clamby::Command do
         before { Clamby.configure(daemonize: true) }
 
         it 'executes the clamdscan executable from the custom path' do
-          expect(runner).to receive(:system).with(
-            "#{custom_path}/clamdscan --no-summary #{good_path}",
-            {}
-          ) { system("exit 0", out: File::NULL) }
+          expect(Open3).to receive(:popen3).with("#{custom_path}/clamdscan", '--no-summary', good_path)
 
           described_class.scan(good_path)
         end

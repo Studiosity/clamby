@@ -1,10 +1,12 @@
+require 'open3'
+
 module Clamby
   # Interface with the system. Builds and runs the command.
   class Command
     EXECUTABLES = %w(clamscan clamdscan freshclam)
 
     # Array containing the complete command line.
-    attr_accessor :command
+    attr_reader :command, :status
 
     # Returns the appropriate scan executable, based on clamd being used.
     def self.scan_executable
@@ -25,25 +27,31 @@ module Clamby
 
       args << "-d #{Clamby.config[:datadir]}" if Clamby.config[:datadir]
 
-      new.run scan_executable, *args
+      virus_type = nil
+      instance = new
+      instance.run scan_executable, *args do |stream, line|
+        next unless stream == :output && matches = line.chomp.match(/: ([\w.-]+) FOUND\z/)
 
-      # $CHILD_STATUS maybe nil if the execution itself (not the client process)
-      # fails
-      case $CHILD_STATUS && $CHILD_STATUS.exitstatus
+        virus_type = matches[1]
+      end
+
+      # instance status maybe nil if the execution itself
+      # (not the child process) fails
+      case instance.status && instance.status.exitstatus
       when 0
         return false
       when nil, 2
         # clamdscan returns 2 whenever error other than a detection happens
         if Clamby.config[:error_clamscan_client_error] && Clamby.config[:daemonize]
-          raise Clamby::ClamscanClientError.new("Clamscan client error")
+          raise Clamby::ClamscanClientError, 'Clamscan client error'
         end
- 
+
         # returns true to maintain legacy behavior
         return true
       else
         return true unless Clamby.config[:error_file_virus]
 
-        raise Clamby::VirusDetected.new("VIRUS DETECTED on #{Time.now}: #{path}")
+        raise Clamby::VirusDetected, path: path, virus_type: virus_type
       end
     end
 
@@ -56,7 +64,14 @@ module Clamby
 
     # Show the ClamAV version. Also acts as a quick check if ClamAV functions.
     def self.clamscan_version
-      new.run scan_executable, '--version'
+      version = nil
+      instance = new
+
+      instance.run scan_executable, '--version' do |stream, line|
+        version = line if stream == :output
+      end
+
+      version.chomp if version && instance.status && instance.status.success?
     end
 
     # Run the given commands via a system call.
@@ -69,10 +84,32 @@ module Clamby
     #   run('clamscan', '-V')
     def run(executable, *args)
       executable_full = executable_path(executable)
-      self.command = args | default_args
-      self.command = command.sort.unshift(executable_full)
+      @command = args | default_args
+      @command = @command.sort.unshift(executable_full)
 
-      system(self.command.join(' '), system_options)
+      Open3.popen3(*command) do |i, o, e, t|
+        # close the input stream
+        i.close
+
+        # read from the output streams
+        [
+          [:output, o, STDOUT],
+          [:error, e, STDERR]
+        ].each do |key, input_stream, output_stream|
+          Thread.new do
+            begin
+              until (line = input_stream.gets).nil? do
+                output_stream.puts line unless Clamby.config[:output_level] == 'off'
+                yield key, line if block_given?
+              end
+            rescue IOError
+            end
+          end
+        end
+
+        # read the command status
+        @status = t.value
+      end
     end
 
     private
@@ -83,15 +120,6 @@ module Clamby
       args << '--quiet' if Clamby.config[:output_level] == 'low'
       args << '--verbose' if Clamby.config[:output_level] == 'high'
       args
-    end
-
-    # This applies to the `system` call itself; does not end up in the command.
-    def system_options
-      if Clamby.config[:output_level] == 'off'
-        { out: File::NULL }
-      else
-        {}
-      end
     end
 
     def executable_path(executable)

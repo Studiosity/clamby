@@ -30,8 +30,16 @@ describe Clamby do
 
     dangerous = file.path
     Clamby.configure({:error_file_virus => true})
-    expect{Clamby.safe?(dangerous)}.to raise_exception(Clamby::VirusDetected)
-    expect{Clamby.virus?(dangerous)}.to raise_exception(Clamby::VirusDetected)
+    expect{Clamby.safe?(dangerous)}.to(
+      raise_exception(
+        an_instance_of(Clamby::VirusDetected).and having_attributes(path: dangerous, virus_type: 'Win.Test.EICAR_HDB-1')
+      )
+    )
+    expect{Clamby.virus?(dangerous)}.to(
+      raise_exception(
+        an_instance_of(Clamby::VirusDetected).and having_attributes(path: dangerous, virus_type: 'Win.Test.EICAR_HDB-1')
+      )
+    )
     Clamby.configure({:error_file_virus => false})
     expect(Clamby.safe?(dangerous)).to be false
     expect(Clamby.virus?(dangerous)).to be true
