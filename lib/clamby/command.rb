@@ -51,7 +51,7 @@ module Clamby
       else
         return true unless Clamby.config[:error_file_virus]
 
-        raise Clamby::VirusDetected, path: path, virus_type: virus_type
+        raise Clamby::VirusDetected.new(path: path, virus_type: virus_type)
       end
     end
 
