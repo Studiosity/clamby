@@ -18,7 +18,7 @@ module Clamby
     def self.scan(path)
       return nil unless file_exists?(path)
 
-      args = [Shellwords.escape(path), '--no-summary']
+      args = [path, '--no-summary']
 
       if Clamby.config[:daemonize]
         args << '--fdpass' if Clamby.config[:fdpass]
